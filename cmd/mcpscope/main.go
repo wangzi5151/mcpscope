@@ -98,6 +98,7 @@ func run(argv []string) error {
 	name, ver, instr := client.ServerInfo()
 	return tui.Run(client, name, ver, instr)
 }
+
 // dumpTools implements --list-tools: print tools as indented JSON.
 func dumpTools(ctx context.Context, client *mcp.Client) error {
 	tools, err := client.ListTools(ctx)
