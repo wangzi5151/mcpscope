@@ -98,3 +98,36 @@ func run(argv []string) error {
 	name, ver, instr := client.ServerInfo()
 	return tui.Run(client, name, ver, instr)
 }
+// dumpTools implements --list-tools: print tools as indented JSON.
+func dumpTools(ctx context.Context, client *mcp.Client) error {
+	tools, err := client.ListTools(ctx)
+	if err != nil {
+		return err
+	}
+	if tools == nil {
+		tools = []mcp.Tool{}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(tools)
+}
+
+// callOnce implements --call: invoke one tool and print its text output.
+// Exits non-zero when the tool itself reports an error.
+func callOnce(ctx context.Context, client *mcp.Client, name, argsJSON string) error {
+	var args map[string]any
+	if strings.TrimSpace(argsJSON) != "" {
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return fmt.Errorf("invalid --args JSON: %w", err)
+		}
+	}
+	res, err := client.CallTool(ctx, name, args)
+	if err != nil {
+		return err
+	}
+	fmt.Println(res.Text())
+	if res.IsError {
+		return fmt.Errorf("tool %q returned an error", name)
+	}
+	return nil
+}
