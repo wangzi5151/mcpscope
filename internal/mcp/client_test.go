@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,10 +48,21 @@ func mockServerMain() {
 				Instructions:    "mock server",
 			})
 		case "tools/list":
-			respond(listToolsResult{Tools: []Tool{
-				{Name: "echo", Description: "Echoes input", InputSchema: map[string]any{"type": "object"}},
-				{Name: "boom", Description: "Always errors"},
-			}})
+			var p listToolsParams
+			raw, _ := json.Marshal(req.Params)
+			_ = json.Unmarshal(raw, &p)
+			if p.Cursor == "" {
+				respond(listToolsResult{
+					Tools: []Tool{
+						{Name: "echo", Description: "Echoes input", InputSchema: map[string]any{"type": "object"}},
+					},
+					NextCursor: "tools-page-2",
+				})
+			} else {
+				respond(listToolsResult{Tools: []Tool{
+					{Name: "boom", Description: "Always errors"},
+				}})
+			}
 		case "tools/call":
 			var p callToolParams
 			raw, _ := json.Marshal(req.Params)
@@ -62,13 +74,33 @@ func mockServerMain() {
 			msg, _ := p.Arguments["message"].(string)
 			respond(CallResult{Content: []ContentBlock{{Type: "text", Text: "echo:" + msg}}})
 		case "resources/list":
-			respond(listResourcesResult{Resources: []Resource{{URI: "mock://x", Name: "x"}}})
+			var p listResourcesParams
+			raw, _ := json.Marshal(req.Params)
+			_ = json.Unmarshal(raw, &p)
+			if p.Cursor == "" {
+				respond(listResourcesResult{
+					Resources:  []Resource{{URI: "mock://x", Name: "x"}},
+					NextCursor: "resources-page-2",
+				})
+			} else {
+				respond(listResourcesResult{Resources: []Resource{{URI: "mock://y", Name: "y"}}})
+			}
 		case "resources/read":
 			respond(readResourceResult{Contents: []ResourceContent{
 				{URI: "mock://x", MimeType: "text/plain", Text: "file contents here"},
 			}})
 		case "prompts/list":
-			respond(listPromptsResult{Prompts: []Prompt{{Name: "p1", Description: "first"}}})
+			var p listPromptsParams
+			raw, _ := json.Marshal(req.Params)
+			_ = json.Unmarshal(raw, &p)
+			if p.Cursor == "" {
+				respond(listPromptsResult{
+					Prompts:    []Prompt{{Name: "p1", Description: "first"}},
+					NextCursor: "prompts-page-2",
+				})
+			} else {
+				respond(listPromptsResult{Prompts: []Prompt{{Name: "p2", Description: "second"}}})
+			}
 		case "prompts/get":
 			respond(getPromptResult{Messages: []PromptMessage{
 				{Role: "user", Content: ContentBlock{Type: "text", Text: "review this"}},
@@ -152,14 +184,14 @@ func TestListResourcesPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rs) != 1 || rs[0].URI != "mock://x" {
+	if len(rs) != 2 || rs[0].URI != "mock://x" || rs[1].URI != "mock://y" {
 		t.Fatalf("unexpected resources: %+v", rs)
 	}
 	ps, err := c.ListPrompts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ps) != 1 || ps[0].Name != "p1" {
+	if len(ps) != 2 || ps[0].Name != "p1" || ps[1].Name != "p2" {
 		t.Fatalf("unexpected prompts: %+v", ps)
 	}
 }
@@ -190,5 +222,21 @@ func TestGetPrompt(t *testing.T) {
 	}
 	if len(msgs) != 1 || msgs[0].Role != "user" || msgs[0].Content.Text != "review this" {
 		t.Fatalf("unexpected messages: %+v", msgs)
+	}
+}
+
+func TestCallResultRenderPreservesNonText(t *testing.T) {
+	r := &CallResult{Content: []ContentBlock{
+		{Type: "text", Text: "hello"},
+		{Type: "text", Text: "world"},
+		{Type: "image", MimeType: "image/png", Data: "base64..."},
+		{Type: "resource", URI: "file:///tmp/a.txt", MimeType: "text/plain"},
+		{Type: "resource", Resource: &ResourceContent{URI: "mock://nested", MimeType: "application/json", Text: "nested body"}},
+	}}
+	got := r.Render()
+	for _, want := range []string{"hello", "world", "[image: image/png]", "file:///tmp/a.txt", "mock://nested", "application/json", "nested body"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Render() missing %q in:\n%s", want, got)
+		}
 	}
 }

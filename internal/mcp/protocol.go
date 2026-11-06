@@ -5,7 +5,11 @@
 // Supported protocol version: 2024-11-05.
 package mcp
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // ProtocolVersion is the MCP protocol version this client speaks.
 const ProtocolVersion = "2024-11-05"
@@ -81,23 +85,94 @@ type Tool struct {
 	InputSchema map[string]any `json:"inputSchema,omitempty"`
 }
 
+type listToolsParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
 type listToolsResult struct {
-	Tools []Tool `json:"tools"`
+	Tools      []Tool `json:"tools"`
+	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 // ContentBlock is a single block inside a tool result.
 type ContentBlock struct {
-	Type     string         `json:"type"`
-	Text     string         `json:"text,omitempty"`
-	Data     string         `json:"data,omitempty"`
-	MimeType string         `json:"mimeType,omitempty"`
-	Extra    map[string]any `json:"-"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Data     string           `json:"data,omitempty"`
+	MimeType string           `json:"mimeType,omitempty"`
+	URI      string           `json:"uri,omitempty"`
+	Name     string           `json:"name,omitempty"`
+	Resource *ResourceContent `json:"resource,omitempty"`
+	Extra    map[string]any   `json:"-"`
+}
+
+// Summary renders one content block as plain text. Text blocks keep their
+// content; non-text blocks become a compact description so images, audio and
+// embedded resources are never silently dropped.
+func (b ContentBlock) Summary() string {
+	switch strings.ToLower(b.Type) {
+	case "text":
+		return b.Text
+	case "image", "audio":
+		if b.MimeType != "" {
+			return fmt.Sprintf("[%s: %s]", b.Type, b.MimeType)
+		}
+		return "[" + b.Type + "]"
+	case "resource", "resource_link":
+		uri, mime := b.URI, b.MimeType
+		if b.Resource != nil {
+			if uri == "" {
+				uri = b.Resource.URI
+			}
+			if mime == "" {
+				mime = b.Resource.MimeType
+			}
+		}
+		var summary string
+		switch {
+		case uri != "" && mime != "":
+			summary = fmt.Sprintf("[%s: %s (%s)]", b.Type, uri, mime)
+		case uri != "":
+			summary = fmt.Sprintf("[%s: %s]", b.Type, uri)
+		case mime != "":
+			summary = fmt.Sprintf("[%s: %s]", b.Type, mime)
+		default:
+			summary = "[" + b.Type + "]"
+		}
+		if b.Resource != nil && b.Resource.Text != "" {
+			return summary + "\n" + b.Resource.Text
+		}
+		return summary
+	default:
+		if b.MimeType != "" {
+			return fmt.Sprintf("[%s: %s]", b.Type, b.MimeType)
+		}
+		if b.URI != "" {
+			return fmt.Sprintf("[%s: %s]", b.Type, b.URI)
+		}
+		if b.Type != "" {
+			return "[" + b.Type + "]"
+		}
+		return ""
+	}
 }
 
 // CallResult is the result of tools/call.
 type CallResult struct {
 	Content []ContentBlock `json:"content"`
 	IsError bool           `json:"isError,omitempty"`
+}
+
+// Render returns all content blocks as plain text: text blocks verbatim and
+// non-text blocks as summaries (type, MIME type and URI where available).
+func (r *CallResult) Render() string {
+	var parts []string
+	for _, b := range r.Content {
+		if s := b.Summary(); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // Text concatenates all text blocks, the most useful rendering for a TUI.
@@ -127,8 +202,13 @@ type Resource struct {
 	MimeType    string `json:"mimeType,omitempty"`
 }
 
+type listResourcesParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
 type listResourcesResult struct {
-	Resources []Resource `json:"resources"`
+	Resources  []Resource `json:"resources"`
+	NextCursor string     `json:"nextCursor,omitempty"`
 }
 
 // ResourceContent is one content item returned by resources/read.
@@ -148,8 +228,13 @@ type Prompt struct {
 	Description string `json:"description,omitempty"`
 }
 
+type listPromptsParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
 type listPromptsResult struct {
-	Prompts []Prompt `json:"prompts"`
+	Prompts    []Prompt `json:"prompts"`
+	NextCursor string   `json:"nextCursor,omitempty"`
 }
 
 // PromptMessage is a single message in a rendered prompt.

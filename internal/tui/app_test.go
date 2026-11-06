@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/wangzi5151/mcpscope/internal/history"
 	"github.com/wangzi5151/mcpscope/internal/mcp"
 )
 
@@ -50,13 +53,17 @@ func TestRenderResult(t *testing.T) {
 	if got := renderResult(r); !strings.Contains(got, "boom") {
 		t.Fatalf("got %q", got)
 	}
-	// Non-text blocks are summarized, not dropped silently.
+	// Non-text blocks are rendered as summaries, not dropped silently.
 	r = &mcp.CallResult{Content: []mcp.ContentBlock{
 		{Type: "text", Text: "see image"},
 		{Type: "image", MimeType: "image/png"},
+		{Type: "resource", URI: "file:///tmp/a.txt"},
 	}}
-	if got := renderResult(r); !strings.Contains(got, "non-text") {
-		t.Fatalf("got %q", got)
+	got := renderResult(r)
+	for _, want := range []string{"see image", "[image: image/png]", "file:///tmp/a.txt"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderResult missing %q in %q", want, got)
+		}
 	}
 	// Empty result.
 	r = &mcp.CallResult{}
@@ -84,5 +91,21 @@ func TestHistoryItemTitle(t *testing.T) {
 	it = historyItem{e: e}
 	if !strings.Contains(it.Title(), "err") {
 		t.Fatalf("got %q", it.Title())
+	}
+}
+
+func TestNewModelLoadsPersistedHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	t.Setenv(history.EnvPath, path)
+	entry := history.Entry{At: time.Now(), Server: "mock 1", Tool: "add", ArgsJSON: `{"a":1}`, Output: "2"}
+	if err := history.Append(path, entry); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModel(nil, "mock", "1", "")
+	if len(m.history) != 1 || m.history[0].Tool != "add" {
+		t.Fatalf("history not loaded: %+v", m.history)
+	}
+	if m.historyPath != path {
+		t.Fatalf("historyPath = %q, want %q", m.historyPath, path)
 	}
 }

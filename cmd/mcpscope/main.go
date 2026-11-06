@@ -19,6 +19,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/wangzi5151/mcpscope/internal/history"
 	"github.com/wangzi5151/mcpscope/internal/mcp"
 	"github.com/wangzi5151/mcpscope/internal/tui"
 )
@@ -42,6 +43,9 @@ func run(argv []string) error {
 	listTools := fs.Bool("list-tools", false, "non-interactive: print the server's tools as JSON and exit")
 	callTool := fs.String("call", "", "non-interactive: call a tool by name and print its result")
 	callArgs := fs.String("args", "{}", "JSON arguments for --call, e.g. '{\"a\": 1}'")
+	historyFile := fs.String("history-file", "", "history JSONL file (default: user config dir)")
+	exportHistory := fs.String("export-history", "", "export persisted call history to FILE (.json or .md); use - for stdout")
+	historyFormat := fs.String("history-format", "", "export format: json or markdown (default: infer from FILE)")
 	fs.SetOutput(os.Stderr)
 	// Custom usage so the "-- <command>" shape is obvious.
 	fs.Usage = func() {
@@ -51,6 +55,8 @@ func run(argv []string) error {
 		fmt.Fprintln(os.Stderr, "  mcpscope [--timeout 30s] -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  mcpscope --list-tools -- <command> [args...]")
 		fmt.Fprintln(os.Stderr, "  mcpscope --call <tool> [--args '{...}'] -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "  mcpscope --export-history history.md")
+		fmt.Fprintln(os.Stderr, "  mcpscope --export-history history.json")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Examples:")
 		fmt.Fprintln(os.Stderr, "  mcpscope -- npx -y @modelcontextprotocol/server-filesystem /tmp")
@@ -69,6 +75,9 @@ func run(argv []string) error {
 	if *showVersion {
 		fmt.Printf("mcpscope %s (commit %s)\n", version, commit)
 		return nil
+	}
+	if *exportHistory != "" {
+		return runExportHistory(*exportHistory, *historyFile, *historyFormat)
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -113,8 +122,9 @@ func dumpTools(ctx context.Context, client *mcp.Client) error {
 	return enc.Encode(tools)
 }
 
-// callOnce implements --call: invoke one tool and print its text output.
-// Exits non-zero when the tool itself reports an error.
+// callOnce implements --call: invoke one tool and print all of its content
+// blocks (text verbatim, non-text as summaries). Exits non-zero when the tool
+// itself reports an error.
 func callOnce(ctx context.Context, client *mcp.Client, name, argsJSON string) error {
 	var args map[string]any
 	if strings.TrimSpace(argsJSON) != "" {
@@ -126,9 +136,54 @@ func callOnce(ctx context.Context, client *mcp.Client, name, argsJSON string) er
 	if err != nil {
 		return err
 	}
-	fmt.Println(res.Text())
+	if out := res.Render(); out != "" {
+		fmt.Println(out)
+	}
 	if res.IsError {
 		return fmt.Errorf("tool %q returned an error", name)
+	}
+	return nil
+}
+
+// runExportHistory writes persisted call history as Markdown or JSON.
+func runExportHistory(dest, path, format string) error {
+	if path == "" {
+		p, err := history.Path()
+		if err != nil {
+			return err
+		}
+		path = p
+	}
+	if format == "" {
+		format = history.FormatForPath(dest)
+	}
+	if _, err := history.NormalizeFormat(format); err != nil {
+		return err
+	}
+	entries, err := history.Load(path)
+	if err != nil {
+		return err
+	}
+
+	w := os.Stdout
+	closeFn := func() error { return nil }
+	if dest != "-" {
+		f, err := os.Create(dest)
+		if err != nil {
+			return err
+		}
+		w = f
+		closeFn = f.Close
+	}
+	if err := history.Export(w, entries, format); err != nil {
+		_ = closeFn()
+		return err
+	}
+	if err := closeFn(); err != nil {
+		return err
+	}
+	if dest != "-" {
+		fmt.Fprintf(os.Stderr, "Wrote %d history entries to %s\n", len(entries), dest)
 	}
 	return nil
 }

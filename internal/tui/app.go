@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/wangzi5151/mcpscope/internal/history"
 	"github.com/wangzi5151/mcpscope/internal/mcp"
 )
 
@@ -51,13 +52,7 @@ const (
 	screenInfo
 )
 
-type historyEntry struct {
-	At       time.Time
-	Tool     string
-	ArgsJSON string
-	Output   string
-	IsError  bool
-}
+type historyEntry = history.Entry
 
 type Model struct {
 	client      *mcp.Client
@@ -70,10 +65,11 @@ type Model struct {
 	tab    tabID
 	screen screen
 
-	tools     []mcp.Tool
-	resources []mcp.Resource
-	prompts   []mcp.Prompt
-	history   []historyEntry
+	tools       []mcp.Tool
+	resources   []mcp.Resource
+	prompts     []mcp.Prompt
+	history     []historyEntry
+	historyPath string
 
 	toolList    list.Model
 	resList     list.Model
@@ -192,7 +188,7 @@ func NewModel(client *mcp.Client, name, version, instructions string) Model {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 65536
 
-	return Model{
+	m := Model{
 		client:             client,
 		serverLabel:        strings.TrimSpace(name + " " + version),
 		serverName:         name,
@@ -207,6 +203,18 @@ func NewModel(client *mcp.Client, name, version, instructions string) Model {
 		loadingRes:         true,
 		loadingPrompts:     true,
 	}
+	if path, err := history.Path(); err != nil {
+		m.loadErr = "history: " + err.Error()
+	} else {
+		m.historyPath = path
+		if entries, err := history.Load(path); err != nil {
+			m.loadErr = "history: " + err.Error()
+		} else if len(entries) > 0 {
+			m.history = entries
+			m.refreshHistoryList()
+		}
+	}
+	return m
 }
 
 // Run starts the interactive TUI.
@@ -241,13 +249,13 @@ func (m Model) callTool(name, argsJSON string) tea.Cmd {
 		if strings.TrimSpace(argsJSON) != "" {
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return callDoneMsg{entry: historyEntry{
-					At: time.Now(), Tool: name, ArgsJSON: argsJSON,
+					At: time.Now(), Server: m.serverLabel, Tool: name, ArgsJSON: argsJSON,
 					Output: "invalid JSON arguments: " + err.Error(), IsError: true,
 				}}
 			}
 		}
 		res, err := m.client.CallTool(context.Background(), name, args)
-		entry := historyEntry{At: time.Now(), Tool: name, ArgsJSON: argsJSON}
+		entry := historyEntry{At: time.Now(), Server: m.serverLabel, Tool: name, ArgsJSON: argsJSON}
 		if err != nil {
 			entry.Output = "rpc error: " + err.Error()
 			entry.IsError = true
@@ -309,26 +317,13 @@ func (m Model) getPromptCmd(name string) tea.Cmd {
 func renderResult(r *mcp.CallResult) string {
 	var sb strings.Builder
 	if r.IsError {
-		sb.WriteString(errStyle.Render("tool returned an error") + "\n\n")
+		sb.WriteString("tool returned an error\n\n")
 	}
-	if text := r.Text(); text != "" {
-		sb.WriteString(text)
-	}
-	// Surface non-text blocks (images etc.) as a summary line.
-	nonText := 0
-	for _, b := range r.Content {
-		if b.Type != "text" {
-			nonText++
-		}
-	}
-	if nonText > 0 {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("(+%d non-text content block(s) not shown)", nonText)))
+	if out := r.Render(); out != "" {
+		sb.WriteString(out)
 	}
 	if sb.Len() == 0 {
-		sb.WriteString(dimStyle.Render("(empty result)"))
+		sb.WriteString("(empty result)")
 	}
 	return sb.String()
 }
@@ -396,6 +391,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case callDoneMsg:
 		m.history = append(m.history, msg.entry)
+		if m.historyPath != "" {
+			if err := history.Append(m.historyPath, msg.entry); err != nil {
+				m.loadErr = "history: " + err.Error()
+			}
+		}
 		m.refreshHistoryList()
 		m.callToolName = msg.entry.Tool
 		m.resultErr = msg.entry.IsError

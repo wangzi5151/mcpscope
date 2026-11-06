@@ -30,8 +30,9 @@ pre-filled from the schema — each property gets its `example`, its `default`,
 or a type-appropriate zero value (`""`, `0`, `false`, `[]`, `{}`), so most
 calls only need small tweaks. Press `ctrl+s` to run, `esc` to cancel.
 
-The result screen shows the concatenated text output (non-text blocks like
-images are noted, not rendered). Tool-side errors are shown in red.
+The result screen shows every content block: text verbatim and non-text blocks
+(images, audio, embedded resources) as summaries with their MIME type/URI.
+Tool-side errors are shown in red.
 
 ### 2 · Resources
 
@@ -50,6 +51,21 @@ Every tool call of the session, newest first, with timestamp, status
 open an entry in the scrollable result view, or `r` to re-run it with the
 same arguments pre-filled.
 
+Calls are persisted as JSONL under the platform config directory, normally
+`~/.config/mcpscope/history.jsonl`, and loaded automatically on the next
+start. Override the location with `MCPSCOPE_HISTORY` or `--history-file`.
+
+### Exporting history
+
+Export the persisted history without starting the TUI:
+
+```sh
+mcpscope --export-history history.md                 # Markdown (inferred)
+mcpscope --export-history history.json               # JSON (inferred)
+mcpscope --export-history - --history-format json    # stdout
+mcpscope --export-history out.md --history-file /path/to/history.jsonl
+```
+
 Press `i` anywhere in the browser to see the server's name, version,
 protocol and instructions.
 
@@ -64,8 +80,12 @@ mcpscope --list-tools -- python3 server.py
 # Just the names
 mcpscope --list-tools -- python3 server.py | jq -r '.[].name'
 
-# Call a tool directly and print its text output
+# Call a tool directly and print all content blocks
 mcpscope --call add --args '{"a": 40, "b": 2}' -- python3 server.py
+
+# Export the history recorded by the TUI
+mcpscope --export-history history.md
+mcpscope --export-history history.json
 ```
 
 Exit code is non-zero if the server can't be reached or the handshake fails;
@@ -93,4 +113,3 @@ mcpscope --timeout 10s -- ./my-server
 
 - SSE / streamable-HTTP transports (`--url`)
 - Named server profiles (`~/.config/mcpscope/servers.yaml`)
-- Export history to Markdown

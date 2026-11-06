@@ -45,9 +45,12 @@ mcpscope -- npx -y @modelcontextprotocol/server-filesystem /tmp
   newline-delimited JSON-RPC 2.0 (MCP `2024-11-05`)
 - 🧰 **Tools tab** — list tools, inspect input schemas, call with a pre-filled
   JSON template (built from the schema's examples/defaults)
-- 📦 **Resources & Prompts tabs** — browse everything the server advertises
-- 🕘 **History tab** — every call with timestamp, arguments and output
-- 🤖 **Scriptable** — `--list-tools` dumps the tool catalogue as JSON for CI/pipes
+- 📦 **Resources & Prompts tabs** — browse everything the server advertises,
+  automatically following `nextCursor` pagination
+- 🕘 **History tab** — every call with timestamp, arguments and full output,
+  persisted to `~/.config/mcpscope/history.jsonl` and exportable as Markdown or JSON
+- 🤖 **Scriptable** — `--list-tools` dumps the tool catalogue as JSON, and
+  `--call` prints every content block (text plus image/audio/resource summaries)
 - 🖥️ **Single static binary** — Linux, macOS, Windows (amd64/arm64)
 
 ## Install
@@ -86,8 +89,13 @@ mcpscope --timeout 10s -- ./target/debug/my-server
 # Non-interactive: print tools as JSON (great for scripts)
 mcpscope --list-tools -- python3 my_mcp_server.py | jq '.[].name'
 
-# Non-interactive: call a tool directly
+# Non-interactive: call a tool directly (prints all content blocks)
 mcpscope --call add --args '{"a": 40, "b": 2}' -- python3 my_mcp_server.py
+
+# Export the history recorded by the TUI
+mcpscope --export-history history.md
+mcpscope --export-history history.json
+mcpscope --export-history - --history-format json
 ```
 
 See [docs/USAGE.md](docs/USAGE.md) for the full guide.
@@ -130,11 +138,15 @@ In scripts/CI use `--list-tools` instead.
 
 **A tool call hangs?** Tune it with `--timeout 10s` (default `30s`).
 
+**Where is history stored?** The TUI appends calls to
+`~/.config/mcpscope/history.jsonl` on Linux (the platform config directory on
+macOS/Windows). Set `MCPSCOPE_HISTORY` or `--history-file` to use another path.
+History is loaded automatically on the next start.
+
 ## Roadmap
 
 - SSE / streamable-HTTP transports
 - Save/load named server profiles
-- Export history as Markdown
 
 ## License
 

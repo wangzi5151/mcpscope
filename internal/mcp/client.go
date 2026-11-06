@@ -100,13 +100,26 @@ func (c *Client) roundTrip(ctx context.Context, method string, params any, out a
 	return nil
 }
 
-// ListTools returns the server's tool catalogue.
+// ListTools returns the server's tool catalogue, following nextCursor pages.
 func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
-	var r listToolsResult
-	if err := c.roundTrip(ctx, "tools/list", struct{}{}, &r); err != nil {
-		return nil, err
+	var tools []Tool
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		if seen[cursor] {
+			return nil, fmt.Errorf("mcp: tools/list returned a repeated cursor %q", cursor)
+		}
+		seen[cursor] = true
+		var r listToolsResult
+		if err := c.roundTrip(ctx, "tools/list", listToolsParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		tools = append(tools, r.Tools...)
+		if r.NextCursor == "" {
+			return tools, nil
+		}
+		cursor = r.NextCursor
 	}
-	return r.Tools, nil
 }
 
 // CallTool invokes a tool by name with JSON arguments.
@@ -118,22 +131,48 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	return &r, nil
 }
 
-// ListResources returns the server's resource catalogue.
+// ListResources returns the server's resource catalogue, following nextCursor pages.
 func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
-	var r listResourcesResult
-	if err := c.roundTrip(ctx, "resources/list", struct{}{}, &r); err != nil {
-		return nil, err
+	var resources []Resource
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		if seen[cursor] {
+			return nil, fmt.Errorf("mcp: resources/list returned a repeated cursor %q", cursor)
+		}
+		seen[cursor] = true
+		var r listResourcesResult
+		if err := c.roundTrip(ctx, "resources/list", listResourcesParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		resources = append(resources, r.Resources...)
+		if r.NextCursor == "" {
+			return resources, nil
+		}
+		cursor = r.NextCursor
 	}
-	return r.Resources, nil
 }
 
-// ListPrompts returns the server's prompt catalogue.
+// ListPrompts returns the server's prompt catalogue, following nextCursor pages.
 func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
-	var r listPromptsResult
-	if err := c.roundTrip(ctx, "prompts/list", struct{}{}, &r); err != nil {
-		return nil, err
+	var prompts []Prompt
+	seen := map[string]bool{}
+	cursor := ""
+	for {
+		if seen[cursor] {
+			return nil, fmt.Errorf("mcp: prompts/list returned a repeated cursor %q", cursor)
+		}
+		seen[cursor] = true
+		var r listPromptsResult
+		if err := c.roundTrip(ctx, "prompts/list", listPromptsParams{Cursor: cursor}, &r); err != nil {
+			return nil, err
+		}
+		prompts = append(prompts, r.Prompts...)
+		if r.NextCursor == "" {
+			return prompts, nil
+		}
+		cursor = r.NextCursor
 	}
-	return r.Prompts, nil
 }
 
 // ReadResource reads a resource's content by URI.
