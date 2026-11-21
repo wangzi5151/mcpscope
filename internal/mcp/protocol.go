@@ -212,20 +212,31 @@ type listResourcesResult struct {
 }
 
 // ResourceContent is one content item returned by resources/read.
+// A server returns exactly one of Text (for textual resources) or Blob
+// (base64-encoded binary data).
 type ResourceContent struct {
 	URI      string `json:"uri"`
 	MimeType string `json:"mimeType,omitempty"`
 	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
 }
 
 type readResourceResult struct {
 	Contents []ResourceContent `json:"contents"`
 }
 
-// Prompt describes an MCP prompt.
-type Prompt struct {
+// PromptArgument describes one argument a prompt accepts.
+type PromptArgument struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// Prompt describes an MCP prompt.
+type Prompt struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
 }
 
 type listPromptsParams struct {

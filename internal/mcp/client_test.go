@@ -95,7 +95,10 @@ func mockServerMain() {
 			_ = json.Unmarshal(raw, &p)
 			if p.Cursor == "" {
 				respond(listPromptsResult{
-					Prompts:    []Prompt{{Name: "p1", Description: "first"}},
+					Prompts: []Prompt{{Name: "p1", Description: "first", Arguments: []PromptArgument{
+						{Name: "code", Description: "code to review", Required: true},
+						{Name: "style"},
+					}}},
 					NextCursor: "prompts-page-2",
 				})
 			} else {
@@ -193,6 +196,10 @@ func TestListResourcesPrompts(t *testing.T) {
 	}
 	if len(ps) != 2 || ps[0].Name != "p1" || ps[1].Name != "p2" {
 		t.Fatalf("unexpected prompts: %+v", ps)
+	}
+	if len(ps[0].Arguments) != 2 || ps[0].Arguments[0].Name != "code" ||
+		!ps[0].Arguments[0].Required || ps[0].Arguments[1].Required {
+		t.Fatalf("prompt arguments not decoded: %+v", ps[0].Arguments)
 	}
 }
 

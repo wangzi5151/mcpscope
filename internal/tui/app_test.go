@@ -94,6 +94,63 @@ func TestHistoryItemTitle(t *testing.T) {
 	}
 }
 
+func TestArgsTemplateExamplesArray(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"path": map[string]any{"type": "string", "examples": []any{"/tmp/x", "/tmp/y"}},
+		},
+	}
+	if got := argsTemplate(schema); !strings.Contains(got, `"path": "/tmp/x"`) {
+		t.Fatalf("examples array not used:\n%s", got)
+	}
+}
+
+func TestRenderPromptMessagesNonText(t *testing.T) {
+	msgs := []mcp.PromptMessage{
+		{Role: "user", Content: mcp.ContentBlock{Type: "text", Text: "look at this"}},
+		{Role: "user", Content: mcp.ContentBlock{Type: "image", MimeType: "image/png"}},
+		{Role: "assistant", Content: mcp.ContentBlock{Type: "resource", URI: "file:///tmp/a.txt"}},
+	}
+	got := renderPromptMessages(msgs)
+	for _, want := range []string{"look at this", "[image: image/png]", "file:///tmp/a.txt"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderPromptMessages missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "(non-text content)") {
+		t.Fatalf("non-text content was dropped:\n%s", got)
+	}
+}
+
+func TestRenderResourceContents(t *testing.T) {
+	got := renderResourceContents([]mcp.ResourceContent{
+		{URI: "mock://a", Text: "hello"},
+		{URI: "mock://b", MimeType: "image/png", Blob: "aGk="}, // base64 "hi"
+	})
+	for _, want := range []string{"hello", "[binary content: image/png, 2 bytes]"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderResourceContents missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestNewModelWithHistoryPathWinsOverEnv(t *testing.T) {
+	envPath := filepath.Join(t.TempDir(), "env.jsonl")
+	explicit := filepath.Join(t.TempDir(), "explicit.jsonl")
+	t.Setenv(history.EnvPath, envPath)
+	entry := history.Entry{At: time.Now(), Tool: "explicit-tool", ArgsJSON: `{}`, Output: "ok"}
+	if err := history.Append(explicit, entry); err != nil {
+		t.Fatal(err)
+	}
+	m := NewModelWithHistoryPath(nil, "mock", "1", "", explicit)
+	if m.historyPath != explicit {
+		t.Fatalf("historyPath = %q, want explicit %q", m.historyPath, explicit)
+	}
+	if len(m.history) != 1 || m.history[0].Tool != "explicit-tool" {
+		t.Fatalf("history not loaded from explicit path: %+v", m.history)
+	}
+}
+
 func TestNewModelLoadsPersistedHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.jsonl")
 	t.Setenv(history.EnvPath, path)

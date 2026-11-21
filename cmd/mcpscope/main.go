@@ -87,7 +87,10 @@ func run(argv []string) error {
 	command, args := rest[0], rest[1:]
 
 	ctx := context.Background()
-	client, err := mcp.Dial(ctx, command, args, *timeout)
+	// Use DialWithInfo so the initialize handshake reports the real build
+	// version (set via -ldflags -X main.version); mcp.Dial would report
+	// the mcp package's own default, which ldflags never overrides.
+	client, err := mcp.DialWithInfo(ctx, command, args, *timeout, "mcpscope", version)
 	if err != nil {
 		return fmt.Errorf("could not connect: %w", err)
 	}
@@ -105,6 +108,9 @@ func run(argv []string) error {
 		return fmt.Errorf("no TTY detected: mcpscope needs an interactive terminal (or use --list-tools)")
 	}
 	name, ver, instr := client.ServerInfo()
+	if *historyFile != "" {
+		return tui.RunWithHistoryPath(client, name, ver, instr, *historyFile)
+	}
 	return tui.Run(client, name, ver, instr)
 }
 
