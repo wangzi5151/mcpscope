@@ -86,6 +86,36 @@ func TestExportMarkdown(t *testing.T) {
 	}
 }
 
+func TestExportMarkdownContentWithFences(t *testing.T) {
+	entries := sampleEntries()
+	entries[0].Output = "before\n```\ninside the fence\n```\nafter"
+	var buf bytes.Buffer
+	if err := Export(&buf, entries, "markdown"); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	// The output block must use a fence longer than the ``` inside the
+	// content, otherwise the embedded fence terminates the block early.
+	if !strings.Contains(got, "````text\nbefore\n```\ninside the fence\n```\nafter\n````") {
+		t.Fatalf("Markdown export did not lengthen the fence:\n%s", got)
+	}
+}
+
+func TestFormatForPath(t *testing.T) {
+	for path, want := range map[string]string{
+		"out.json": "json",
+		"OUT.JSON": "json",
+		"out.md":   "markdown",
+		"out.txt":  "markdown",
+		"-":        "markdown",
+		"noext":    "markdown",
+	} {
+		if got := FormatForPath(path); got != want {
+			t.Fatalf("FormatForPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestNormalizeFormat(t *testing.T) {
 	for _, tc := range []struct {
 		in   string

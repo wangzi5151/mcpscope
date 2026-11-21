@@ -142,6 +142,28 @@ func Export(w io.Writer, entries []Entry, format string) error {
 	}
 }
 
+// fenceFor returns a Markdown code fence that content cannot break out
+// of: one backtick longer than the longest backtick run inside content,
+// and at least three backticks.
+func fenceFor(content string) string {
+	longest, run := 0, 0
+	for _, r := range content {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	n := longest + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
+}
+
 func exportMarkdown(w io.Writer, entries []Entry) error {
 	if _, err := fmt.Fprintf(w, "# mcpscope call history\n\n_%d call(s)_\n\n", len(entries)); err != nil {
 		return err
@@ -166,10 +188,13 @@ func exportMarkdown(w io.Writer, entries []Entry) error {
 		if args == "" {
 			args = "{}"
 		}
-		if _, err := fmt.Fprintf(w, "**Arguments**\n\n```json\n%s\n```\n\n", args); err != nil {
+		argsFence := fenceFor(args)
+		if _, err := fmt.Fprintf(w, "**Arguments**\n\n%sjson\n%s\n%s\n\n", argsFence, args, argsFence); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(w, "**Output**\n\n```text\n%s\n```\n\n", strings.TrimRight(e.Output, "\n")); err != nil {
+		output := strings.TrimRight(e.Output, "\n")
+		outFence := fenceFor(output)
+		if _, err := fmt.Fprintf(w, "**Output**\n\n%stext\n%s\n%s\n\n", outFence, output, outFence); err != nil {
 			return err
 		}
 	}
