@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -182,7 +183,15 @@ func newList(title string) list.Model {
 }
 
 // NewModel builds the TUI model around an already-connected client.
+// The history file is resolved from MCPSCOPE_HISTORY / the user config dir.
 func NewModel(client *mcp.Client, name, version, instructions string) Model {
+	return NewModelWithHistoryPath(client, name, version, instructions, "")
+}
+
+// NewModelWithHistoryPath is NewModel with an explicit history file path
+// (e.g. from --history-file); a non-empty path wins over MCPSCOPE_HISTORY
+// and the default location.
+func NewModelWithHistoryPath(client *mcp.Client, name, version, instructions, historyPath string) Model {
 	ta := textarea.New()
 	ta.Placeholder = `{"key": "value"}`
 	ta.ShowLineNumbers = false
@@ -203,23 +212,34 @@ func NewModel(client *mcp.Client, name, version, instructions string) Model {
 		loadingRes:         true,
 		loadingPrompts:     true,
 	}
-	if path, err := history.Path(); err != nil {
-		m.loadErr = "history: " + err.Error()
-	} else {
-		m.historyPath = path
-		if entries, err := history.Load(path); err != nil {
+	path := historyPath
+	if path == "" {
+		p, err := history.Path()
+		if err != nil {
 			m.loadErr = "history: " + err.Error()
-		} else if len(entries) > 0 {
-			m.history = entries
-			m.refreshHistoryList()
+			return m
 		}
+		path = p
+	}
+	m.historyPath = path
+	if entries, err := history.Load(path); err != nil {
+		m.loadErr = "history: " + err.Error()
+	} else if len(entries) > 0 {
+		m.history = entries
+		m.refreshHistoryList()
 	}
 	return m
 }
 
 // Run starts the interactive TUI.
 func Run(client *mcp.Client, name, version, instructions string) error {
-	p := tea.NewProgram(NewModel(client, name, version, instructions), tea.WithAltScreen())
+	return RunWithHistoryPath(client, name, version, instructions, "")
+}
+
+// RunWithHistoryPath is Run with an explicit history file path
+// (e.g. from --history-file).
+func RunWithHistoryPath(client *mcp.Client, name, version, instructions, historyPath string) error {
+	p := tea.NewProgram(NewModelWithHistoryPath(client, name, version, instructions, historyPath), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
@@ -274,14 +294,7 @@ func (m Model) readResourceCmd(uri string) tea.Cmd {
 		if err != nil {
 			return readDoneMsg{title: uri, output: "rpc error: " + err.Error(), isError: true}
 		}
-		var sb strings.Builder
-		for i, c := range contents {
-			if i > 0 {
-				sb.WriteString("\n---\n")
-			}
-			sb.WriteString(c.Text)
-		}
-		out := sb.String()
+		out := renderResourceContents(contents)
 		if strings.TrimSpace(out) == "" {
 			out = dimStyle.Render("(empty resource)")
 		}
@@ -296,22 +309,58 @@ func (m Model) getPromptCmd(name string) tea.Cmd {
 		if err != nil {
 			return readDoneMsg{title: "prompt: " + name, output: "rpc error: " + err.Error(), isError: true}
 		}
-		var sb strings.Builder
-		for _, msg := range msgs {
-			sb.WriteString(panelTitleStyle.Render(msg.Role) + "\n")
-			if msg.Content.Text != "" {
-				sb.WriteString(msg.Content.Text + "\n")
-			} else {
-				sb.WriteString(dimStyle.Render("(non-text content)") + "\n")
-			}
-			sb.WriteString("\n")
-		}
-		out := strings.TrimSpace(sb.String())
+		out := strings.TrimSpace(renderPromptMessages(msgs))
 		if out == "" {
 			out = dimStyle.Render("(empty prompt)")
 		}
 		return readDoneMsg{title: "prompt: " + name, output: out}
 	}
+}
+
+// renderResourceContents renders resources/read contents as plain text.
+// Textual contents are shown verbatim; binary (blob) contents become a
+// summary instead of rendering as an empty string.
+func renderResourceContents(contents []mcp.ResourceContent) string {
+	var sb strings.Builder
+	for i, c := range contents {
+		if i > 0 {
+			sb.WriteString("\n---\n")
+		}
+		switch {
+		case c.Text != "":
+			sb.WriteString(c.Text)
+		case c.Blob != "":
+			n := len(c.Blob)
+			if raw, err := base64.StdEncoding.DecodeString(c.Blob); err == nil {
+				n = len(raw)
+			}
+			mime := c.MimeType
+			if mime == "" {
+				mime = "unknown type"
+			}
+			fmt.Fprintf(&sb, "[binary content: %s, %d bytes]", mime, n)
+		case c.MimeType != "":
+			fmt.Fprintf(&sb, "[empty content: %s]", c.MimeType)
+		}
+	}
+	return sb.String()
+}
+
+// renderPromptMessages renders prompts/get messages as plain text,
+// summarising non-text content blocks (images, resources, …) the same
+// way tool results are rendered instead of dropping them.
+func renderPromptMessages(msgs []mcp.PromptMessage) string {
+	var sb strings.Builder
+	for _, msg := range msgs {
+		sb.WriteString(panelTitleStyle.Render(msg.Role) + "\n")
+		if s := msg.Content.Summary(); s != "" {
+			sb.WriteString(s + "\n")
+		} else {
+			sb.WriteString(dimStyle.Render("(empty content)") + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 func renderResult(r *mcp.CallResult) string {
@@ -771,6 +820,19 @@ func (m Model) promptDetail() string {
 	} else {
 		sb.WriteString(dimStyle.Render("(no description)"))
 	}
+	if len(sel.p.Arguments) > 0 {
+		sb.WriteString("\n\n" + panelTitleStyle.Render("Arguments") + "\n")
+		for _, a := range sel.p.Arguments {
+			line := a.Name
+			if a.Required {
+				line += " (required)"
+			}
+			if a.Description != "" {
+				line += " — " + a.Description
+			}
+			sb.WriteString(line + "\n")
+		}
+	}
 	return sb.String()
 }
 
@@ -920,6 +982,10 @@ func placeholder(ps any) any {
 	}
 	if ex, ok := pm["example"]; ok {
 		return ex
+	}
+	// JSON Schema spells the plural form "examples": a list of examples.
+	if exs, ok := pm["examples"].([]any); ok && len(exs) > 0 {
+		return exs[0]
 	}
 	if d, ok := pm["default"]; ok {
 		return d
